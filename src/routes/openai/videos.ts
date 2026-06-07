@@ -29,15 +29,35 @@ app.post('/videos', async (c) => {
 })
 
 app.get('/videos/:taskId', async (c) => {
-    return c.json({
-        message: "/videos/:taskId endpoint is working!"
-    });
+   const id = c.req.param("taskId");
+  const res = await fetch(`${BASE_URL}/videos/${id}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const json = await res.json();
+//   console.log(json);
+
+  return c.json(json);
 })
 
 app.get('/videos/:taskId/content', async (c) => {
-    return c.json({
-        message: "/videos/:taskId/content endpoint is working!"
-    });
+   const id = c.req.param("taskId");
+  const res = await fetch(`${BASE_URL}/videos/${id}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  const json = await res.json();
+  console.log(json);
+
+  return c.redirect(json.video_url);
 })
 
 app.get('/models', async (c) => {
