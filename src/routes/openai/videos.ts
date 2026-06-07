@@ -131,26 +131,52 @@ app.post("/videos", async (c) => {
   return c.json(json, res.status as any);
 });
 
-app.get('/videos/:taskId', async (c) => {
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function readStatus(payload: any) {
+  return String(payload?.status || payload?.data?.status || "").toLowerCase();
+}
+
+function isDone(status: string) {
+  return ["completed", "failed", "cancelled", "expired", "succeeded"].includes(status);
+}
+
+app.get("/videos/:taskId", async (c) => {
   const authorization = c.req.header("Authorization");
   if (!authorization) {
-    return c.json({ error: "缺少 Authorization" }, 401);
+    return c.json({ error: { message: "缺少 Authorization" } }, 401);
   }
 
-   const id = c.req.param("taskId");
-  const res = await fetch(`${BASE_URL}/videos/${id}`, {
-    method: "GET",
-    headers: {
-      Authorization: authorization,
-      "Content-Type": "application/json",
-    },
-  });
+  const id = c.req.param("taskId");
+  const startedAt = Date.now();
+  const holdMs = 24000;
+  const upstreamPollMs = 3000;
 
-  const json = await res.json();
-//   console.log(json);
+  let lastJson: any = { id, status: "pending" };
 
-  return c.json(json);
-})
+  while (Date.now() - startedAt < holdMs) {
+    const res = await fetch(`${BASE_URL}/videos/${id}`, {
+      method: "GET",
+      headers: {
+        Authorization: authorization,
+        "Content-Type": "application/json",
+      },
+    });
+
+    const json = await res.json();
+    lastJson = json;
+
+    const status = readStatus(json);
+
+    if (isDone(status)) {
+      return c.json(json);
+    }
+
+    await sleep(upstreamPollMs);
+  }
+
+  return c.json(lastJson);
+});
 
 app.get('/videos/:taskId/content', async (c) => {
   const authorization = c.req.header("Authorization");
