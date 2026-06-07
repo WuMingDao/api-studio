@@ -1,25 +1,45 @@
 import { Hono } from "hono";
 import { env } from "../../data/env.ts";
+import z from "zod";
+import { sValidator } from '@hono/standard-validator'
+
 
 const app = new Hono()
 
 const BASE_URL = env.OPENAI_VIDEO_BASE_URL;
 const API_KEY = env.OPENAI_VIDEO_KEY;
 
-app.post('/videos', async (c) => {
-    const body = {
-    model: "veo3.1-fast-720p",
-    prompt:
-      "Continue this video naturally. Keep the same character, outfit, visual style, camera movement, and cinematic lighting. The character keeps running forward smoothly.",
-    seconds: "8",
-    size: "1280x720",
-    // images: [imageDataUrl],
-    // video: "https://many-lands-make.loca.lt/videos/video.mp4",
-  };
+const generateVideoSchema = z.object({
+    model: z.string(),
+    prompt: z.string(),
+    seconds: z.string(),
+    size: z.enum(["1280x720", "720x1280","1792x1024", "1024x1792", "1920x1080"]),
+    resolution_name: z.enum(["480p","720p", "1080p"]),
+    preset: z.enum(["fast", "standard", "slow", "normal"]),
+    input_reference: z.array(z.instanceof(File))
+})
+
+app.post('/videos', sValidator('json', generateVideoSchema),  async (c) => {
+  //   const body = {
+  //   model: "veo3.1-fast-720p",
+  //   prompt:
+  //     "Continue this video naturally. Keep the same character, outfit, visual style, camera movement, and cinematic lighting. The character keeps running forward smoothly.",
+  //   seconds: "8",
+  //   size: "1280x720",
+  //   // images: [imageDataUrl],
+  //   // video: "https://many-lands-make.loca.lt/videos/video.mp4",
+  // };
+  const authorization = c.req.header("Authorization");
+  if (!authorization) {
+    return c.json({ error: "缺少 Authorization" }, 401);
+  }
+  
+  const body = c.req.valid('json')
+  
   const res = await fetch(`${BASE_URL}/videos`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${API_KEY}`,
+      Authorization: authorization,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -29,11 +49,16 @@ app.post('/videos', async (c) => {
 })
 
 app.get('/videos/:taskId', async (c) => {
+  const authorization = c.req.header("Authorization");
+  if (!authorization) {
+    return c.json({ error: "缺少 Authorization" }, 401);
+  }
+
    const id = c.req.param("taskId");
   const res = await fetch(`${BASE_URL}/videos/${id}`, {
     method: "GET",
     headers: {
-      Authorization: `Bearer ${API_KEY}`,
+      Authorization: authorization,
       "Content-Type": "application/json",
     },
   });
@@ -45,6 +70,11 @@ app.get('/videos/:taskId', async (c) => {
 })
 
 app.get('/videos/:taskId/content', async (c) => {
+  const authorization = c.req.header("Authorization");
+  if (!authorization) {
+    return c.json({ error: "缺少 Authorization" }, 401);
+  }
+
    const taskId = c.req.param("taskId");
   /**
    * 1. 查询任务，拿到 video_url
@@ -52,7 +82,7 @@ app.get('/videos/:taskId/content', async (c) => {
   const taskRes = await fetch(`${BASE_URL}/videos/${taskId}`, {
     method: "GET",
     headers: {
-      Authorization: `Bearer ${API_KEY}`,
+      Authorization: authorization,
       Accept: "application/json",
     },
   });
@@ -155,10 +185,15 @@ app.get('/videos/:taskId/content', async (c) => {
 })
 
 app.get('/models', async (c) => {
+  const authorization = c.req.header("Authorization");
+  if (!authorization) {
+    return c.json({ error: "缺少 Authorization" }, 401);
+  }
+
    const data =  await fetch(`${BASE_URL}/models`, {
         method: 'GET',
         headers: {
-            'Authorization': `Bearer ${API_KEY}`,
+            'Authorization': authorization,
             'Content-Type': 'application/json'
         }
    })
