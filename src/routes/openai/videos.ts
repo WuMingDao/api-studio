@@ -9,44 +9,91 @@ const app = new Hono()
 const BASE_URL = env.OPENAI_VIDEO_BASE_URL;
 const API_KEY = env.OPENAI_VIDEO_KEY;
 
+const fileSchema = z
+  .instanceof(File)
+  .refine((file) => file.size > 0, "参考图不能为空")
+  .refine((file) => file.type.startsWith("image/"), "input_reference[] 只支持图片文件")
+  .refine((file) => file.size <= 30 * 1024 * 1024, "单张参考图不能超过 30MB");
 const generateVideoSchema = z.object({
-    model: z.string(),
-    prompt: z.string(),
-    seconds: z.string(),
-    size: z.enum(["1280x720", "720x1280","1792x1024", "1024x1792", "1920x1080"]),
-    resolution_name: z.enum(["480p","720p", "1080p"]),
-    preset: z.enum(["fast", "standard", "slow", "normal"]),
-    input_reference: z.array(z.instanceof(File))
-})
-
-app.post('/videos', sValidator('json', generateVideoSchema),  async (c) => {
-  //   const body = {
-  //   model: "veo3.1-fast-720p",
-  //   prompt:
-  //     "Continue this video naturally. Keep the same character, outfit, visual style, camera movement, and cinematic lighting. The character keeps running forward smoothly.",
-  //   seconds: "8",
-  //   size: "1280x720",
-  //   // images: [imageDataUrl],
-  //   // video: "https://many-lands-make.loca.lt/videos/video.mp4",
-  // };
+  model: z.string().min(1, "model 不能为空"),
+  prompt: z.string().min(1, "prompt 不能为空"),
+  seconds: z.string().min(1, "seconds 不能为空"),
+  size: z
+    .enum(["1280x720", "720x1280", "1792x1024", "1024x1792", "1920x1080"])
+    .optional(),
+  resolution_name: z.enum(["480p", "720p", "1080p"]),
+  preset: z.enum(["fast", "standard", "slow", "normal"]),
+  input_reference: z.array(fileSchema).max(7, "参考图最多 7 张").optional().default([]),
+});
+app.post("/videos", async (c) => {
   const authorization = c.req.header("Authorization");
   if (!authorization) {
     return c.json({ error: "缺少 Authorization" }, 401);
   }
-  
-  const body = c.req.valid('json')
-  
+  /**
+   * 重点：这里不能用 c.req.valid("json")
+   * 因为当前请求是 multipart/form-data
+   */
+  const formData = await c.req.formData();
+  /**
+   * 兼容 input_reference 和 input_reference[]
+   */
+  const inputReferences = [
+    ...formData.getAll("input_reference"),
+    ...formData.getAll("input_reference[]"),
+  ].filter((item): item is File => item instanceof File);
+  const payload = {
+    model: formData.get("model"),
+    prompt: formData.get("prompt"),
+    seconds: formData.get("seconds"),
+    size: formData.get("size") || undefined,
+    resolution_name: formData.get("resolution_name"),
+    preset: formData.get("preset"),
+    input_reference: inputReferences,
+  };
+  const parsed = generateVideoSchema.safeParse(payload);
+  if (!parsed.success) {
+    return c.json(
+      {
+        data: {},
+        error: parsed.error.issues,
+        success: false,
+      },
+      400,
+    );
+  }
+  const body = parsed.data;
+  /**
+   * 继续转发给上游。
+   * 因为包含 binary 文件，所以这里也必须用 FormData。
+   */
+  const upstreamForm = new FormData();
+  upstreamForm.append("model", body.model);
+  upstreamForm.append("prompt", body.prompt);
+  upstreamForm.append("seconds", body.seconds);
+  upstreamForm.append("resolution_name", body.resolution_name);
+  upstreamForm.append("preset", body.preset);
+  if (body.size) {
+    upstreamForm.append("size", body.size);
+  }
+  for (const file of body.input_reference) {
+    upstreamForm.append("input_reference[]", file, file.name);
+  }
   const res = await fetch(`${BASE_URL}/videos`, {
     method: "POST",
     headers: {
       Authorization: authorization,
-      "Content-Type": "application/json",
+      /**
+       * 重点：
+       * 这里不要写 Content-Type: multipart/form-data
+       * fetch 会自动生成 boundary。
+       */
     },
-    body: JSON.stringify(body),
+    body: upstreamForm,
   });
   const json = await res.json();
-  return c.json(json);
-})
+  return c.json(json, res.status as any);
+});
 
 app.get('/videos/:taskId', async (c) => {
   const authorization = c.req.header("Authorization");
