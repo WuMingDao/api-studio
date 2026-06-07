@@ -7,9 +7,25 @@ const BASE_URL = env.OPENAI_VIDEO_BASE_URL;
 const API_KEY = env.OPENAI_VIDEO_KEY;
 
 app.post('/videos', async (c) => {
-    return c.json({
-        message: "/videos endpoint is working!"
-    });
+    const body = {
+    model: "veo3.1-fast-720p",
+    prompt:
+      "Continue this video naturally. Keep the same character, outfit, visual style, camera movement, and cinematic lighting. The character keeps running forward smoothly.",
+    seconds: "8",
+    size: "1280x720",
+    // images: [imageDataUrl],
+    // video: "https://many-lands-make.loca.lt/videos/video.mp4",
+  };
+  const res = await fetch(`${BASE_URL}/videos`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const json = await res.json();
+  return c.json(json);
 })
 
 app.get('/videos/:taskId', async (c) => {
