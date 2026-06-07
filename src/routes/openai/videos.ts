@@ -46,35 +46,111 @@ app.get('/videos/:taskId', async (c) => {
 
 app.get('/videos/:taskId/content', async (c) => {
    const taskId = c.req.param("taskId");
-  const res = await fetch(`${BASE_URL}/videos/${taskId}`, {
+  /**
+   * 1. 查询任务，拿到 video_url
+   */
+  const taskRes = await fetch(`${BASE_URL}/videos/${taskId}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${API_KEY}`,
-      "Content-Type": "application/json",
+      Accept: "application/json",
     },
   });
-
-  const json = await res.json();
-  console.log(json);
-
-  const videoUrl = json.video_url;
-  const range = c.req.header('Range')
+  if (!taskRes.ok) {
+    const text = await taskRes.text().catch(() => "");
+    return c.json(
+      {
+        error: "获取视频任务失败",
+        detail: text,
+      },
+      taskRes.status as any,
+    );
+  }
+  const json = await taskRes.json();
+  console.log("video task:", json);
+  const videoUrl =
+    json.video_url ||
+    json.videoUrl ||
+    json.data?.video_url ||
+    json.data?.videoUrl ||
+    json.output?.video_url ||
+    json.output?.videoUrl;
+  if (!videoUrl) {
+    return c.json(
+      {
+        error: "视频还未生成完成或 video_url 不存在",
+        status: json.status || json.state,
+        detail: json,
+      },
+      202,
+    );
+  }
+  /**
+   * 2. 透传 Range，前端 video 标签拖动进度条需要这个
+   */
+  const range = c.req.header("Range");
   const videoRes = await fetch(videoUrl, {
-    headers: range ? { Range: range } : undefined,
-  })
-  const headers = new Headers()
-  headers.set('Content-Type', videoRes.headers.get('content-type') || 'video/mp4')
-  headers.set('Content-Disposition', `inline; filename="${taskId}.mp4"`)
-  const contentLength = videoRes.headers.get('content-length')
-  const contentRange = videoRes.headers.get('content-range')
-  const acceptRanges = videoRes.headers.get('accept-ranges')
-  if (contentLength) headers.set('Content-Length', contentLength)
-  if (contentRange) headers.set('Content-Range', contentRange)
-  if (acceptRanges) headers.set('Accept-Ranges', acceptRanges)
+    method: "GET",
+    headers: range
+      ? {
+          Range: range,
+        }
+      : undefined,
+  });
+  if (!videoRes.ok && videoRes.status !== 206) {
+    const text = await videoRes.text().catch(() => "");
+    return c.json(
+      {
+        error: "获取视频内容失败",
+        detail: text,
+      },
+      videoRes.status as any,
+    );
+  }
+  /**
+   * 3. 设置视频响应头
+   */
+  const headers = new Headers();
+  headers.set(
+    "Content-Type",
+    videoRes.headers.get("content-type") || "video/mp4",
+  );
+  headers.set("Content-Disposition", `inline; filename="${taskId}.mp4"`);
+  /**
+   * 这些 header 很关键：
+   * - Content-Length: 前端知道文件大小
+   * - Content-Range: 支持分段播放
+   * - Accept-Ranges: 告诉浏览器支持拖动
+   */
+  const contentLength = videoRes.headers.get("content-length");
+  const contentRange = videoRes.headers.get("content-range");
+  const acceptRanges = videoRes.headers.get("accept-ranges");
+  const cacheControl = videoRes.headers.get("cache-control");
+  const etag = videoRes.headers.get("etag");
+  const lastModified = videoRes.headers.get("last-modified");
+  if (contentLength) headers.set("Content-Length", contentLength);
+  if (contentRange) headers.set("Content-Range", contentRange);
+  if (acceptRanges) {
+    headers.set("Accept-Ranges", acceptRanges);
+  } else {
+    headers.set("Accept-Ranges", "bytes");
+  }
+  if (cacheControl) headers.set("Cache-Control", cacheControl);
+  else headers.set("Cache-Control", "public, max-age=3600");
+  if (etag) headers.set("ETag", etag);
+  if (lastModified) headers.set("Last-Modified", lastModified);
+  /**
+   * 如果前后端跨域，这个也很重要。
+   * 否则浏览器拿不到 Content-Range 等头。
+   */
+  headers.set(
+    "Access-Control-Expose-Headers",
+    "Content-Length, Content-Range, Accept-Ranges, Content-Type",
+  );
   return new Response(videoRes.body, {
     status: videoRes.status,
     headers,
-  })
+  });
 
 })
 
