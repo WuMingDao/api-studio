@@ -45,8 +45,8 @@ app.get('/videos/:taskId', async (c) => {
 })
 
 app.get('/videos/:taskId/content', async (c) => {
-   const id = c.req.param("taskId");
-  const res = await fetch(`${BASE_URL}/videos/${id}`, {
+   const taskId = c.req.param("taskId");
+  const res = await fetch(`${BASE_URL}/videos/${taskId}`, {
     method: "GET",
     headers: {
       Authorization: `Bearer ${API_KEY}`,
@@ -57,7 +57,25 @@ app.get('/videos/:taskId/content', async (c) => {
   const json = await res.json();
   console.log(json);
 
-  return c.redirect(json.video_url);
+  const videoUrl = json.video_url;
+  const range = c.req.header('Range')
+  const videoRes = await fetch(videoUrl, {
+    headers: range ? { Range: range } : undefined,
+  })
+  const headers = new Headers()
+  headers.set('Content-Type', videoRes.headers.get('content-type') || 'video/mp4')
+  headers.set('Content-Disposition', `inline; filename="${taskId}.mp4"`)
+  const contentLength = videoRes.headers.get('content-length')
+  const contentRange = videoRes.headers.get('content-range')
+  const acceptRanges = videoRes.headers.get('accept-ranges')
+  if (contentLength) headers.set('Content-Length', contentLength)
+  if (contentRange) headers.set('Content-Range', contentRange)
+  if (acceptRanges) headers.set('Accept-Ranges', acceptRanges)
+  return new Response(videoRes.body, {
+    status: videoRes.status,
+    headers,
+  })
+
 })
 
 app.get('/models', async (c) => {
