@@ -21,18 +21,50 @@ const generateVideoSchema = z.object({
   size: z
     .enum(["1280x720", "720x1280", "1792x1024", "1024x1792", "1920x1080"])
     .optional(),
-  resolution_name: z.enum(["480p", "720p", "1080p"]),
-  preset: z.enum(["fast", "standard", "slow", "normal"]),
-  input_reference: z.array(fileSchema).max(7, "参考图最多 7 张").optional().default([]),
+  resolution_name: z.enum(["480p", "720p", "1080p"]).optional(),
+  preset: z.enum(["fast", "standard", "slow", "normal"]).optional(),
+  /**
+   * 前端传来的 input_reference[]，这里归一化成 input_reference
+   * 可以不传，所以 default([])
+   */
+  input_reference: z.array(fileSchema).max(9, "参考图最多 9 张").default([]),
 });
+
+async function fileToDataUrl(file: File) {
+  const arrayBuffer = await file.arrayBuffer();
+  const base64 = arrayBufferToBase64(arrayBuffer);
+
+  return `data:${file.type || "image/png"};base64,${base64}`;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer) {
+  /**
+   * Node.js / Bun 环境
+   */
+  if (typeof Buffer !== "undefined") {
+    return Buffer.from(buffer).toString("base64");
+  }
+
+  /**
+   * Cloudflare Workers / 浏览器类环境
+   */
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+
+  return btoa(binary);
+}
+
 app.post("/videos", async (c) => {
   const authorization = c.req.header("Authorization");
   if (!authorization) {
     return c.json({ error: "缺少 Authorization" }, 401);
   }
   /**
-   * 重点：这里不能用 c.req.valid("json")
-   * 因为当前请求是 multipart/form-data
+   * 前端传的是 multipart/form-data，所以这里不能用 valid("json")
    */
   const formData = await c.req.formData();
   /**
@@ -47,8 +79,8 @@ app.post("/videos", async (c) => {
     prompt: formData.get("prompt"),
     seconds: formData.get("seconds"),
     size: formData.get("size") || undefined,
-    resolution_name: formData.get("resolution_name"),
-    preset: formData.get("preset"),
+    resolution_name: formData.get("resolution_name") || undefined,
+    preset: formData.get("preset") || undefined,
     input_reference: inputReferences,
   };
   const parsed = generateVideoSchema.safeParse(payload);
@@ -64,32 +96,36 @@ app.post("/videos", async (c) => {
   }
   const body = parsed.data;
   /**
-   * 继续转发给上游。
-   * 因为包含 binary 文件，所以这里也必须用 FormData。
+   * 把 input_reference[] 文件转成 imageDataUrl
    */
-  const upstreamForm = new FormData();
-  upstreamForm.append("model", body.model);
-  upstreamForm.append("prompt", body.prompt);
-  upstreamForm.append("seconds", body.seconds);
-  upstreamForm.append("resolution_name", body.resolution_name);
-  upstreamForm.append("preset", body.preset);
+  const images = await Promise.all(
+    body.input_reference.map((file) => fileToDataUrl(file)),
+  );
+  /**
+   * 上游真实需要的 JSON body
+   */
+  const upstreamBody: Record<string, unknown> = {
+    model: body.model,
+    prompt: body.prompt,
+    seconds: body.seconds,
+    images,
+  };
   if (body.size) {
-    upstreamForm.append("size", body.size);
+    upstreamBody.size = body.size;
   }
-  for (const file of body.input_reference) {
-    upstreamForm.append("input_reference[]", file, file.name);
+  if (body.resolution_name) {
+    upstreamBody.resolution_name = body.resolution_name;
+  }
+  if (body.preset) {
+    upstreamBody.preset = body.preset;
   }
   const res = await fetch(`${BASE_URL}/videos`, {
     method: "POST",
     headers: {
       Authorization: authorization,
-      /**
-       * 重点：
-       * 这里不要写 Content-Type: multipart/form-data
-       * fetch 会自动生成 boundary。
-       */
+      "Content-Type": "application/json",
     },
-    body: upstreamForm,
+    body: JSON.stringify(upstreamBody),
   });
   const json = await res.json();
   return c.json(json, res.status as any);
