@@ -2,8 +2,15 @@ import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import videoRoute from './routes/openai/videos.ts'
 import { env } from './data/env.ts'
+import { cors } from 'hono/cors'
 
 const app = new Hono()
+
+app.use(cors(
+  {
+    origin: env.CORS_ORIGIN,
+  },
+))
 
 app.get('/', (c) => {
   return c.text('Success!')
