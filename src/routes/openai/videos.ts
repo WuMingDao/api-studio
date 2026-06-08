@@ -149,8 +149,8 @@ app.get("/videos/:taskId", async (c) => {
 
   const id = c.req.param("taskId");
   const startedAt = Date.now();
-  const holdMs = 24000;
-  const upstreamPollMs = 3000;
+  const holdMs = env.HOLD_MS;
+  const upstreamPollMs = env.UP_STREAM_TIMEOUT_MS;
 
   let lastJson: any = { id, status: "pending" };
 

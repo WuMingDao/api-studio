@@ -7,6 +7,8 @@ const envSchema = z.object({
     OPENAI_VIDEO_BASE_URL: z.string().url(),
     PORT: z.coerce.number().default(3000),
     CORS_ORIGIN: z.string().url(),
+    HOLD_MS: z.coerce.number().default(24000),
+    UP_STREAM_TIMEOUT_MS: z.coerce.number().default(3000),
 });
 
 const parsed = envSchema.safeParse(process.env);
